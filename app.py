@@ -39,7 +39,6 @@ embedding_cache ={}
 def generate_embedding(text: str) -> List[float]:
     if text in embedding_cache:
         return embedding_cache[text]
-    print(type(text))
     embeddings = HuggingFaceInferenceAPIEmbeddings(api_key=os.getenv("hf_token"), model_name="sentence-transformers/all-MiniLM-l6-v2")
     response = embeddings.embed_query(text)
     embedding_cache[text]=response
@@ -84,7 +83,7 @@ def get_product_search(query):
         "queryVector": generate_embedding(query),
         "path": "embeddings",
         "numCandidates": 100,
-        "limit": 10,
+        "limit": 4,
         # "index": "vector_search_index",
         "index": "vx",
         }}
