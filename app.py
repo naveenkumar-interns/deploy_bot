@@ -190,16 +190,11 @@ def prioritize_products(user_intent, products):
         # Format the input string correctly and pass it as the 'input' variable
   
         response = llm.invoke(prompt)
+        prompt = ""
+  
+        print("AI product result :",response.content.replace("\n", "").replace("```json", "").replace("```", "").strip())
 
-        result = response.content.replace("\n", "").replace("```json", "").replace("```", "").strip()
-
-
-        print("AI product result :",result)
-        
-        # Parse the response as JSON
-        sorted_products = json.loads(result)
-
-        return sorted_products
+        return json.loads(response.content.replace("\n", "").replace("```json", "").replace("```", "").strip())
     
     except Exception as e:
         print(f"Error in prioritize_products: {str(e)}")
@@ -229,6 +224,7 @@ def get_response(input_text,related_products,chat_history=None):
         chain = prompt | llm
 
         response = chain.invoke({"input": input_text, "related_products":related_products, "chathistory": chat_history})
+
         return response.content
     
     except Exception as e:
@@ -272,9 +268,12 @@ def chat_product_search():
         related_product = get_product_search(research_intent_response)
 
         prioritize_products_response = prioritize_products(research_intent_response,related_product)
+        related_product = ""
+
         print("\n\nprioritize_products_response : ", prioritize_products_response)
 
         ai_response = get_response(input_text = message['content'], related_products=prioritize_products_response, chat_history=chat_history)
+        chat_history = []
         
         response = {
             'content': ai_response,
@@ -282,6 +281,7 @@ def chat_product_search():
             'timestamp': datetime.now().isoformat(),
             'related_products_for_query':prioritize_products_response
         }        
+        ai_response = ""
         return jsonify(response)
     
     except Exception as e:
