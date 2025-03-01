@@ -1,6 +1,7 @@
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import json
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
 import os
@@ -61,15 +62,15 @@ def convert_to_json(data):
         'inventory_quantity': product.get('inventory_quantity'),
         'vendor': product.get('vendor')
         }
-        iteminfo = {
-        'title': product.get('title'),
-        'product_type': product.get('product_type'),
-        'description': product.get('description'),
-        'vendor': product.get('vendor'),
-        'price': product.get('price'),
-        'inventory_quantity': product.get('inventory_quantity')
-        }
-        forai.append(iteminfo)
+        # iteminfo = {
+        # 'title': product.get('title'),
+        # 'product_type': product.get('product_type'),
+        # 'description': product.get('description'),
+        # 'vendor': product.get('vendor'),
+        # 'price': product.get('price'),
+        # 'inventory_quantity': product.get('inventory_quantity')
+        # }
+        # forai.append(iteminfo)
         result.append(product_info)
 
     print(result)
@@ -83,7 +84,7 @@ def get_product_search(query):
         "queryVector": generate_embedding(query),
         "path": "embeddings",
         "numCandidates": 100,
-        "limit": 5,
+        "limit": 10,
         # "index": "vector_search_index",
         "index": "vx",
         }}
@@ -128,6 +129,80 @@ def research_intent(chat_history):
         return response.content.strip()
     except Exception as e:
         print(f"Error in research_intent: {str(e)}")
+        raise
+
+def prioritize_products(user_intent, products):
+
+    llm = ChatGoogleGenerativeAI(
+    model="gemini-1.5-flash",
+    temperature=0.7,
+    max_tokens=10000,
+    timeout=None,
+    max_retries=2,
+    google_api_key=os.getenv("GOOGLE_API_KEY"),
+)
+
+    input_str = f"Intent: '{user_intent}'\nProducts: {json.dumps(products, indent=2)}"
+    try:
+        prompt = """You are a Product Prioritization Expert specializing in ranking products based on user intent, price constraints, and relevance. Your goal is to filter, reorder, and return the most relevant, price-appropriate products first.
+
+        Rules for Prioritization:
+        1 Match User Intent: Prioritize products that contain keywords from the intent in the title, description, or product type.
+        2 Apply Price Constraints: If a price limit is provided (e.g., 'under $30'), exclude items exceeding this threshold.
+        3 Sort Order:
+        - First, by intent relevance (strongest keyword matches first).
+        - Then, by price (low to high) within relevant matches.
+        4 Output Format: Return a JSON array of the top 8 most relevant products.
+
+        Examples:
+        Example 1
+        Intent: 'waterproof gloves under $20'
+        Products:
+        [
+        {"id": 1, "title": "Waterproof Gloves", "price": "19.99", "inventory_quantity": 5, "description": "Waterproof"},
+        {"id": 2, "title": "Leather Gloves", "price": "25.00", "inventory_quantity": 3, "description": "Durable"}
+        ]
+        Output:
+        [
+        {"id": 1, "title": "Waterproof Gloves", "price": "19.99", "inventory_quantity": 5, "description": "Waterproof"}
+        ]
+
+        Example 2
+        Intent: 'touchscreen gloves'
+        Products:
+        [
+        {"id": 4, "title": "Touchscreen Gloves", "price": "29.99", "inventory_quantity": 2, "description": "Touchscreen"},
+        {"id": 5, "title": "Work Gloves", "price": "15.00", "inventory_quantity": 4, "description": "Rugged"}
+        ]
+        Output:
+        [
+        {"id": 4, "title": "Touchscreen Gloves", "price": "29.99", "inventory_quantity": 2, "description": "Touchscreen"},
+        {"id": 5, "title": "Work Gloves", "price": "15.00", "inventory_quantity": 4, "description": "Rugged"}
+        ]
+
+        Task Execution:
+        Now, apply these rules to the following product dataset and return the top 8 most relevant products in sorted JSON format:
+
+        """ + input_str
+
+
+
+        # Format the input string correctly and pass it as the 'input' variable
+  
+        response = llm.invoke(prompt)
+
+        result = response.content.replace("\n", "").replace("```json", "").replace("```", "").strip()
+
+
+        print("AI product result :",result)
+        
+        # Parse the response as JSON
+        sorted_products = json.loads(result)
+
+        return sorted_products
+    
+    except Exception as e:
+        print(f"Error in prioritize_products: {str(e)}")
         raise
 
 
@@ -190,17 +265,22 @@ def chat_product_search():
 
         research_intent_response = research_intent(chat_history)
 
-        print(chat_history,research_intent_response)
-        
-        related_product,for_ai = get_product_search(research_intent_response)
+        print("chat_history : ", chat_history)
+        print("\n\nresearch_intent_response : ", research_intent_response)
 
-        ai_response = get_response(input_text = message['content'], related_products=for_ai, chat_history=chat_history)
+        
+        related_product = get_product_search(research_intent_response)
+
+        prioritize_products_response = prioritize_products(research_intent_response,related_product)
+        print("\n\nprioritize_products_response : ", prioritize_products_response)
+
+        ai_response = get_response(input_text = message['content'], related_products=prioritize_products_response, chat_history=chat_history)
         
         response = {
             'content': ai_response,
             'sender': 'bot',
             'timestamp': datetime.now().isoformat(),
-            'related_products_for_query':related_product
+            'related_products_for_query':prioritize_products_response
         }        
         return jsonify(response)
     
@@ -219,4 +299,4 @@ def home():
     return jsonify({"message": "working"})
 
 if __name__ == "__main__":
-    app.run()
+    app.run(debug=True)
