@@ -1,3 +1,4 @@
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from langchain_core.prompts import ChatPromptTemplate
@@ -21,7 +22,6 @@ chat_history_collection = user_db["chats"]
 
 app = Flask(__name__)
 CORS(app)
-
 
 
 llm = ChatGoogleGenerativeAI(
@@ -90,6 +90,46 @@ def get_product_search(query):
     ])
     return convert_to_json(results)
 
+def research_intent(chat_history):
+    try:
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", 
+             "You are a senior research assistant. Your job is to analyze the user's chat history, "
+             "track relevant topics, and predict exactly what the user is looking for now. "
+             "If the user changes the topic, clear old context and respond accordingly.\n\n"
+             "You should return only a single word or phrase summarizing the request based on cumulative filters.\n\n"
+             
+             "Example 1:\n"
+             "User: I need a heater.\n"
+             "Bot: Heater\n"
+             "User: I need a 220V one.\n"
+             "Bot: Heater 220V\n"
+             "User: I need it in black.\n"
+             "Bot: Heater 220V Black\n"
+             "User: Can you list tables?\n"
+             "Bot: Table (Context reset!)\n\n"
+
+             "Example 2:\n"
+             "User: Show me smartphones.\n"
+             "Bot: Smartphone\n"
+             "User: I need one with 128GB storage.\n"
+             "Bot: Smartphone 128GB\n"
+             "User: Show me refrigerators.\n"
+             "Bot: Refrigerator (Context reset!)\n\n"
+
+             "Now, analyze the following conversation and return the cumulative filtered request."),
+            ("human", "{chat_history}")
+        ])
+
+        chain = prompt | llm
+
+        response = chain.invoke({"chat_history": chat_history})
+
+        return response.content.strip()
+    except Exception as e:
+        print(f"Error in research_intent: {str(e)}")
+        raise
+
 
 def get_response(input_text,related_products,chat_history=None):
     try:
@@ -105,7 +145,6 @@ def get_response(input_text,related_products,chat_history=None):
 
         note: act as a chatbot 
         Deliver the response here in plain text without any formatting.
-        chat history: {chathistory}
         related products for the recent user query: {related_products}
         """,
     ),
@@ -129,8 +168,8 @@ def chat_product_search():
     try:
         message = request.json
         email = message.get('email')
-        if email is None:
-            return jsonify({'error': 'email is required'}), 400
+        # if email is None:
+        #     return jsonify({'error': 'email is required'}), 400
 
         query = {"Email": email} if email else {"Email": "guest_69dd2db7-11bf-49cc-934c-14fa2811bb4c"}
         chat_history = list(chat_history_collection.find(query))
@@ -143,12 +182,17 @@ def chat_product_search():
         if len(chat_history) > 10:
             chat_history = chat_history[-10:]
 
+        chat_history.append(message)
+
         message.update({
             'timestamp': datetime.now().isoformat()
         })
-        chat_history.append(message)
+
+        research_intent_response = research_intent(chat_history)
+
+        print(chat_history,research_intent_response)
         
-        related_product,for_ai = get_product_search(message['content'])
+        related_product,for_ai = get_product_search(research_intent_response)
 
         ai_response = get_response(input_text = message['content'], related_products=for_ai, chat_history=chat_history)
         
@@ -175,4 +219,4 @@ def home():
     return jsonify({"message": "working"})
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run()
