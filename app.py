@@ -252,7 +252,7 @@ def get_response(input_text,related_products,user_intent):
 
         chain = prompt | llm
 
-        response = chain.invoke({"input": input_text, "related_products":related_products, "chathistory": chat_history})
+        response = chain.invoke({"input": input_text, "related_products":related_products})
 
         return response.content
     
