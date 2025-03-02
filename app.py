@@ -13,7 +13,18 @@ from typing import List
 
 load_dotenv()
 
-client = pymongo.MongoClient("mongodb+srv://jsckson_store:jsckson_store@cluster0.9a981.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0")
+GOOGLE_API_KEY = "AIzaSyDR5hSTYjo6jbiTpHw8AEKZsuRVEEFcAJk"
+hf_token = "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"
+MONGO_URI = "mongodb+srv://jsckson_store:jsckson_store@cluster0.9a981.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+
+model_1 = "gemini-1.5-flash"
+model_2 = "gemini-2.0-pro-exp-02-05"
+model_3 = "gemini-2.0-flash-lite"
+
+
+
+
+client = pymongo.MongoClient(MONGO_URI)
 db = client["jacksonHardwareDB"]
 collection = db["inventory"]
 user_client = pymongo.MongoClient("mongodb+srv://sudhakaran:URvEVWjORGTkaeaq@cluster0.znyhl.mongodb.net/chatbot?retryWrites=true&w=majority&appName=Cluster0")
@@ -21,17 +32,19 @@ user_db = user_client["chatbot"]
 chat_history_collection = user_db["chats"]
 
 
+
+
 app = Flask(__name__)
 CORS(app)
 
 
 llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash",
+    model=model_1,
     temperature=0.7,
     max_tokens=60,
     timeout=None,
     max_retries=2,
-    google_api_key=os.getenv("GOOGLE_API_KEY"),
+    google_api_key=GOOGLE_API_KEY,
 )
 
 embedding_cache ={}
@@ -39,7 +52,7 @@ embedding_cache ={}
 def generate_embedding(text: str) -> List[float]:
     if text in embedding_cache:
         return embedding_cache[text]
-    embeddings = HuggingFaceInferenceAPIEmbeddings(api_key=os.getenv("hf_token"), model_name="sentence-transformers/all-MiniLM-l6-v2")
+    embeddings = HuggingFaceInferenceAPIEmbeddings(api_key=hf_token, model_name="sentence-transformers/all-MiniLM-l6-v2")
     response = embeddings.embed_query(text)
     embedding_cache[text]=response
     return response
@@ -91,35 +104,45 @@ def get_product_search(query):
     return convert_to_json(results)
 
 def research_intent(chat_history):
+    llm = ChatGoogleGenerativeAI(
+    model=model_2,
+    temperature=0.7,
+    max_tokens=60,
+    timeout=None,
+    max_retries=2,
+    google_api_key=GOOGLE_API_KEY
+    )
+
     try:
         prompt = ChatPromptTemplate.from_messages([
-            ("system", 
-             "You are a senior research assistant. Your job is to analyze the user's chat history, "
-             "track relevant topics, and predict exactly what the user is looking for now. "
-             "If the user changes the topic, clear old context and respond accordingly.\n\n"
-             "You should return only a single word or phrase summarizing the request based on cumulative filters.\n\n"
-             
-             "Example 1:\n"
-             "User: I need a heater.\n"
-             "Bot: Heater\n"
-             "User: I need a 220V one.\n"
-             "Bot: Heater 220V\n"
-             "User: I need it in black.\n"
-             "Bot: Heater 220V Black\n"
-             "User: Can you list tables?\n"
-             "Bot: Table (Context reset!)\n\n"
+        (
+        "system",
+            """You are a senior research assistant. 
+            Analyze the chat history to track the user's current topic and predict their request.
+              Accumulate filters (e.g., specifications) until the topic changes, then reset context. 
+              Respond with only a phrase summarizing the current request, prioritizing the latest input. No explanations or additional text.
 
-             "Example 2:\n"
-             "User: Show me smartphones.\n"
-             "Bot: Smartphone\n"
-             "User: I need one with 128GB storage.\n"
-             "Bot: Smartphone 128GB\n"
-             "User: Show me refrigerators.\n"
-             "Bot: Refrigerator (Context reset!)\n\n"
+                Examples:
+                1. User: I need a heater.
+                Bot: Heater
+                User: I need a 220V one.
+                Bot: Heater 220V
+                User: I need it in black.
+                Bot: Heater 220V Black
+                User: Can you list tables?
+                Bot: Table
 
-             "Now, analyze the following conversation and return the cumulative filtered request."),
-            ("human", "{chat_history}")
-        ])
+                2. User: Show me smartphones.
+                Bot: Smartphone
+                User: I need one with 128GB storage.
+                Bot: Smartphone 128GB
+                User: Show me refrigerators.
+                Bot: Refrigerator
+
+                Analyze the conversation and return the summarizing word or phrase."""
+        ),
+        ("human", "{chat_history}")
+    ])
 
         chain = prompt | llm
 
@@ -133,25 +156,37 @@ def research_intent(chat_history):
 def prioritize_products(user_intent, products):
 
     llm = ChatGoogleGenerativeAI(
-    model="gemini-1.5-flash",
+    model=model_3,
     temperature=0.7,
-    max_tokens=10000,
+    max_tokens=50000,
     timeout=None,
     max_retries=2,
-    google_api_key=os.getenv("GOOGLE_API_KEY"),
+    google_api_key=GOOGLE_API_KEY,
 )
 
-    input_str = f"Intent: '{user_intent}'\nProducts: {json.dumps(products, indent=2)}"
+    input_str = f"User asks for : '{user_intent}'\n Products we have: {json.dumps(products, indent=2)}"
     try:
-        prompt = """You are a Product Prioritization Expert specializing in ranking products based on user intent, price constraints, and relevance. Your goal is to filter, reorder, and return the most relevant, price-appropriate products first.
+        prompt = """ Role: You are a Product Prioritization Expert specializing in ranking products based on user intent, price constraints, and relevance. 
+            Your task is to filter, reorder, and return the most relevant products that match the user's intent and budget.
 
-        Rules for Prioritization:
-        1 Match User Intent: Prioritize products that contain keywords from the intent in the title, description, or product type.
-        2 Apply Price Constraints: If a price limit is provided (e.g., 'under $30'), exclude items exceeding this threshold.
-        3 Sort Order:
-        - First, by intent relevance (strongest keyword matches first).
-        - Then, by price (low to high) within relevant matches.
-        4 Output Format: Return a JSON array of the top 8 most relevant products.
+            Rules for Prioritization:
+            1. **Match User Intent**: 
+            - Prioritize products that contain keywords from the user's intent in the title, description, or product type.
+            - Stronger keyword matches (e.g., exact matches in the title) should rank higher.
+
+            2. **Apply Price Constraints**:
+            - If a price limit is specified (e.g., "under $30"), exclude products exceeding this threshold.
+            - If no price limit is provided, ignore this rule.
+
+            3. **Sort Order**:
+            - First, sort by **intent relevance** (strongest keyword matches first).
+            - Then, sort by **price** (low to high) within products of equal relevance.
+
+            4. **Output Format**:
+            - Return a JSON array of the top 8 most relevant products.
+            - Do not modify any values inside the input data.** Only reorder and filter based on the rules.
+
+
 
         Examples:
         Example 1
@@ -203,19 +238,13 @@ def prioritize_products(user_intent, products):
 def get_response(input_text,related_products,chat_history=None):
     try:
         prompt = ChatPromptTemplate.from_messages([
-        (
+    (
         "system",
-        """You are Jackson Hardware Store's AI assistant. Your job is to:
-        1. Help customers find the right tools, hardware, or equipment.
-        2. Suggest relevant products based on customer needs and related items.
-        3. Share key product details like brand, features, use cases, and availability.
-        5. note important: Avoid using technical formatting like new line symbols, markdown symbols *, _, etc., or bullet points.
-        6.  Respond in a short, direct manner <maximum 1-2 brief sentences> with only the most relevant information. and max tokens 20
-
-        note: act as a chatbot 
-        Deliver the response here in plain text without any formatting.
-        related products for the recent user query: {related_products}
-        """,
+        """You are Jackson Hardware Store's AI assistant. Your role is to help customers find tools, hardware, or equipment,
+          suggest relevant products based on their needs, and provide key details like brand, features, or availability. 
+          Respond in 1-2 short, direct sentences (max 20 tokens) with no technical formatting, explanations, or symbols. 
+          avoid preambles. and talk in a friendly manner.
+          Use related products from: {related_products}."""
     ),
     ("human", "{input}"),
 ])
@@ -230,16 +259,14 @@ def get_response(input_text,related_products,chat_history=None):
         print(f"Error in get_response: {str(e)}")
         raise 
         
-
-
    
 @app.route('/chat', methods=['POST'])
 def chat_product_search():
     try:
         message = request.json
         email = message.get('email')
-        # if email is None:
-        #     return jsonify({'error': 'email is required'}), 400
+        if email is None:
+            return jsonify({'error': 'email is required'}), 400
 
         query = {"Email": email} if email else {"Email": "guest_69dd2db7-11bf-49cc-934c-14fa2811bb4c"}
         chat_history = list(chat_history_collection.find(query))
@@ -252,16 +279,17 @@ def chat_product_search():
         if len(chat_history) > 10:
             chat_history = chat_history[-10:]
 
-        chat_history.append(message)
+        chat_history.append({'sender': message.get('sender'), 'text': message.get('content')})
 
         message.update({
             'timestamp': datetime.now().isoformat()
         })
 
         research_intent_response = research_intent(chat_history)
+        chat_history = []
 
-        print("chat_history : ", chat_history)
-        print("\n\nresearch_intent_response : ", research_intent_response)
+        # print("\n\nchat_history : ", chat_history)
+        # print("\n\nresearch_intent_response : ", research_intent_response)
 
         
         related_product = get_product_search(research_intent_response)
@@ -269,10 +297,10 @@ def chat_product_search():
         prioritize_products_response = prioritize_products(research_intent_response,related_product)
         related_product = ""
 
-        print("\n\nprioritize_products_response : ", prioritize_products_response)
+        # print("\n\nprioritize_products_response : ", prioritize_products_response)
 
-        ai_response = get_response(input_text = message['content'], related_products=prioritize_products_response, chat_history=chat_history)
-        chat_history = []
+        ai_response = get_response(input_text = message['content'], related_products=prioritize_products_response)
+  
         
         response = {
             'content': ai_response,
