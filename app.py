@@ -235,7 +235,7 @@ def prioritize_products(user_intent, products):
         raise
 
 
-def get_response(input_text,related_products,chat_history=None):
+def get_response(input_text,related_products,user_intent):
     try:
         prompt = ChatPromptTemplate.from_messages([
     (
@@ -244,6 +244,7 @@ def get_response(input_text,related_products,chat_history=None):
           suggest relevant products based on their needs, and provide key details like brand, features, or availability. 
           Respond in 1-2 short, direct sentences (max 20 tokens) with no technical formatting, explanations, or symbols. 
           avoid preambles. and talk in a friendly manner.
+          Actual user intention: {user_intent}
           Use related products from: {related_products}."""
     ),
     ("human", "{input}"),
@@ -299,7 +300,7 @@ def chat_product_search():
 
         # print("\n\nprioritize_products_response : ", prioritize_products_response)
 
-        ai_response = get_response(input_text = message['content'], related_products=prioritize_products_response)
+        ai_response = get_response(input_text = message['content'], user_intent = research_intent_response,related_products=prioritize_products_response)
   
         
         response = {
